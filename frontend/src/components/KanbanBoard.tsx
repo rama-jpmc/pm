@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -15,9 +15,39 @@ import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
-export const KanbanBoard = () => {
-  const [board, setBoard] = useState<BoardData>(() => initialData);
+type KanbanBoardProps = {
+  initialBoard?: BoardData;
+  userId?: string | null;
+};
+
+const API_BASE = "http://127.0.0.1:8000";
+
+export const KanbanBoard = ({ initialBoard, userId }: KanbanBoardProps) => {
+  const [board, setBoard] = useState<BoardData>(() => {
+    if (initialBoard && initialBoard.columns.length > 0) {
+      return initialBoard;
+    }
+    return initialData;
+  });
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialBoard && initialBoard.columns.length > 0) {
+      setBoard(initialBoard);
+    }
+  }, [initialBoard]);
+
+  useEffect(() => {
+    if (!userId || !board.columns.length) {
+      return;
+    }
+
+    fetch(`${API_BASE}/api/board`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, board }),
+    }).catch(() => undefined);
+  }, [board, userId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
