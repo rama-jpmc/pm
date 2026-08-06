@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import { ChatPanel } from "@/components/ChatPanel";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { LoginScreen } from "@/components/LoginScreen";
+import type { BoardData } from "@/lib/kanban";
 
 const API_BASE = "http://127.0.0.1:8000";
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-  const [board, setBoard] = useState({ columns: [], cards: {} });
+  const [board, setBoard] = useState<BoardData>({ columns: [], cards: {} });
 
   useEffect(() => {
     if (!userId) {
@@ -38,8 +39,8 @@ export default function Home() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.8fr_0.7fr]">
-      <KanbanBoard initialBoard={board} userId={userId} />
-      <ChatPanel />
+      <KanbanBoard board={board} onBoardChange={setBoard} userId={userId} />
+      <ChatPanel board={board} userId={userId} onBoardUpdate={setBoard} />
     </div>
   );
 }

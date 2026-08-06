@@ -16,13 +16,14 @@ import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
 type KanbanBoardProps = {
-  initialBoard?: BoardData;
+  board: BoardData;
   userId?: string | null;
+  onBoardChange: (board: BoardData) => void;
 };
 
 const API_BASE = "http://127.0.0.1:8000";
 
-export const KanbanBoard = ({ initialBoard, userId }: KanbanBoardProps) => {
+export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => {
     if (initialBoard && initialBoard.columns.length > 0) {
       return initialBoard;
@@ -49,6 +50,14 @@ export const KanbanBoard = ({ initialBoard, userId }: KanbanBoardProps) => {
     }).catch(() => undefined);
   }, [board, userId]);
 
+  const updateBoard = (updater: (prev: BoardData) => BoardData) => {
+    setBoard((prev) => {
+      const next = updater(prev);
+      onBoardChange(next);
+      return next;
+    });
+  };
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
@@ -69,14 +78,14 @@ export const KanbanBoard = ({ initialBoard, userId }: KanbanBoardProps) => {
       return;
     }
 
-    setBoard((prev) => ({
+    updateBoard((prev) => ({
       ...prev,
       columns: moveCard(prev.columns, active.id as string, over.id as string),
     }));
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
+    updateBoard((prev) => ({
       ...prev,
       columns: prev.columns.map((column) =>
         column.id === columnId ? { ...column, title } : column
@@ -86,7 +95,7 @@ export const KanbanBoard = ({ initialBoard, userId }: KanbanBoardProps) => {
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
-    setBoard((prev) => ({
+    updateBoard((prev) => ({
       ...prev,
       cards: {
         ...prev.cards,
@@ -101,22 +110,20 @@ export const KanbanBoard = ({ initialBoard, userId }: KanbanBoardProps) => {
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
-    setBoard((prev) => {
-      return {
-        ...prev,
-        cards: Object.fromEntries(
-          Object.entries(prev.cards).filter(([id]) => id !== cardId)
-        ),
-        columns: prev.columns.map((column) =>
-          column.id === columnId
-            ? {
-                ...column,
-                cardIds: column.cardIds.filter((id) => id !== cardId),
-              }
-            : column
-        ),
-      };
-    });
+    updateBoard((prev) => ({
+      ...prev,
+      cards: Object.fromEntries(
+        Object.entries(prev.cards).filter(([id]) => id !== cardId)
+      ),
+      columns: prev.columns.map((column) =>
+        column.id === columnId
+          ? {
+              ...column,
+              cardIds: column.cardIds.filter((id) => id !== cardId),
+            }
+          : column
+      ),
+    }));
   };
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
