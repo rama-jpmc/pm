@@ -10,7 +10,7 @@ This project is implementing a minimal proof-of-concept project management app w
 - Backend: FastAPI running locally with a small SQLite database file.
 - Persistence: each user has a single board record stored as JSON in the database.
 - Authentication: a simple front-end mock login using the demo credentials user / password.
-- Chat: a lightweight UI-only chat experience for the PoC; it does not yet call an AI provider.
+- Chat: sidebar chat calls the backend `/api/chat` endpoint, which in turn calls OpenRouter (`openai/gpt-oss-120b`) and can return a structured board update that is auto-applied and persisted.
 - Delivery: the frontend is built as a static export and served by the backend for local development and container-based deployment.
 - Docker: local container support is scaffolded with a Dockerfile, docker-compose.yml, and shell scripts for start/stop.
 
@@ -52,16 +52,17 @@ This project is implementing a minimal proof-of-concept project management app w
 - [x] Verify the app works locally with the backend running.
 
 ### Part 8: AI connectivity
-- [ ] Add OpenRouter-based AI connectivity.
-- [ ] Validate a simple AI request flow.
+- [x] Add OpenRouter-based AI connectivity (`POST /api/chat` in `backend/app/main.py`).
+- [x] Validate a simple AI request flow (`test_chat_endpoint_parses_ai_response` mocks the OpenRouter call).
+- [ ] Exercise the flow against the real OpenRouter API (current test coverage mocks `httpx.post`; not yet verified against a live response).
 
 ### Part 9: Structured AI board updates
-- [ ] Send the board JSON and user conversation context to the model.
-- [ ] Support structured responses that optionally update the Kanban.
+- [x] Send the board JSON and user conversation context to the model.
+- [x] Support structured responses that optionally update the Kanban (`extract_json_object`/`parse_ai_response_text` parse `assistant_message` + optional `board`, and persist the board when present).
 
 ### Part 10: Full chat experience
-- [ ] Add a polished sidebar chat experience.
-- [ ] Allow the assistant to update the board automatically from structured responses.
+- [x] Add a polished sidebar chat experience (`ChatPanel.tsx`: message history, loading/error states, auto-scroll, "Board updated by AI" confirmation).
+- [x] Allow the assistant to update the board automatically from structured responses (`onBoardUpdate` applied when the response includes a `board`).
 
 ## Success criteria for the current PoC
 
@@ -72,4 +73,4 @@ This project is implementing a minimal proof-of-concept project management app w
 
 ## Notes for the next phase
 
-The remaining work focuses on replacing the placeholder chat experience with real AI integration and structured board updates. That should happen only after the current PoC is considered stable.
+Core AI chat flow (Parts 8-10) is implemented end to end, but only verified with a mocked OpenRouter response in tests. Remaining work: a real run against the live OpenRouter API with a valid `OPENROUTER_API_KEY`, and hardening around malformed/non-JSON model output (currently falls back to treating the raw text as the assistant message with no board update, which is reasonable but untested against real model quirks).

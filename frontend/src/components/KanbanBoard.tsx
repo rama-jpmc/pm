@@ -18,7 +18,7 @@ import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 type KanbanBoardProps = {
   board: BoardData;
   userId?: string | null;
-  onBoardChange: (board: BoardData) => void;
+  onBoardChange?: (board: BoardData) => void;
 };
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -53,7 +53,7 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
   const updateBoard = (updater: (prev: BoardData) => BoardData) => {
     setBoard((prev) => {
       const next = updater(prev);
-      onBoardChange(next);
+      onBoardChange?.(next);
       return next;
     });
   };

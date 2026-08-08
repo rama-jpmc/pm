@@ -8,15 +8,19 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 APP_ROOT = Path(__file__).resolve().parents[1]
-FRONTEND_ROOT = APP_ROOT.parent / "frontend" / "out"
+PROJECT_ROOT = APP_ROOT.parent
+FRONTEND_ROOT = PROJECT_ROOT / "frontend" / "out"
 DB_PATH = APP_ROOT / "data" / "kanban.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 def get_connection() -> sqlite3.Connection:
@@ -198,7 +202,7 @@ def chat(payload: ChatRequest) -> ChatResponse:
 
     try:
         response = httpx.post(
-            "https://api.openrouter.ai/v1/chat/completions",
+            "https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": "openai/gpt-oss-120b",
