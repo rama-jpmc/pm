@@ -4,4 +4,4 @@ Backend implementation notes
 - Add OpenRouter AI chat connectivity through `/api/chat`.
 - Use `OPENROUTER_API_KEY` from environment for secure access.
 - Support structured assistant responses with an optional `board` field for updates.
-- Keep board persistence separate from chat flow; chat can suggest board changes without saving automatically.
+- When a chat response includes a valid `board` field, persist it immediately as part of the `/api/chat` call (validated the same way as `/api/board`) rather than requiring a separate explicit save.

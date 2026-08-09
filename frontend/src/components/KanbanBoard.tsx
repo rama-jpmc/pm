@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -14,7 +14,7 @@ import {
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { API_BASE } from "@/lib/config";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { createId, hasBoardData, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
 type KanbanBoardProps = {
   board: BoardData;
@@ -22,39 +22,68 @@ type KanbanBoardProps = {
   onBoardChange?: (board: BoardData) => void;
 };
 
+const SAVE_DEBOUNCE_MS = 400;
+
 export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: KanbanBoardProps) => {
-  const [board, setBoard] = useState<BoardData>(() => {
-    if (initialBoard && initialBoard.columns.length > 0) {
-      return initialBoard;
-    }
-    return initialData;
-  });
+  const [board, setBoard] = useState<BoardData>(() =>
+    hasBoardData(initialBoard) ? initialBoard : initialData
+  );
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [syncedBoard, setSyncedBoard] = useState(initialBoard);
+  const [saveError, setSaveError] = useState(false);
+  const saveTimerRef = useRef<number | null>(null);
 
   if (initialBoard !== syncedBoard) {
     setSyncedBoard(initialBoard);
-    if (initialBoard && initialBoard.columns.length > 0) {
+    if (hasBoardData(initialBoard)) {
       setBoard(initialBoard);
     }
   }
 
+  // Clear any pending debounced save if the component unmounts mid-edit.
   useEffect(() => {
-    if (!userId || !board.columns.length) {
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Persist a board to the backend, debounced so rapid successive edits
+  // (e.g. typing a column title) collapse into a single request. Only
+  // called from user-driven mutations below, never from the prop-sync
+  // above, so boards that arrive via props (initial load, AI chat updates)
+  // are never redundantly re-saved.
+  const saveBoard = (next: BoardData) => {
+    if (!userId) {
       return;
     }
 
-    fetch(`${API_BASE}/api/board`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, board }),
-    }).catch(() => undefined);
-  }, [board, userId]);
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      fetch(`${API_BASE}/api/board`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, board: next }),
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to save board: ${response.status}`);
+          }
+          setSaveError(false);
+        })
+        .catch(() => setSaveError(true));
+    }, SAVE_DEBOUNCE_MS);
+  };
 
   const updateBoard = (updater: (prev: BoardData) => BoardData) => {
     const next = updater(board);
     setBoard(next);
     onBoardChange?.(next);
+    saveBoard(next);
   };
 
   const sensors = useSensors(
@@ -62,8 +91,6 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
       activationConstraint: { distance: 6 },
     })
   );
-
-  const cardsById = useMemo(() => board.cards, [board.cards]);
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveCardId(event.active.id as string);
@@ -125,7 +152,7 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
     }));
   };
 
-  const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
     <div className="relative overflow-hidden">
@@ -167,6 +194,11 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
               </div>
             ))}
           </div>
+          {saveError ? (
+            <p className="text-sm font-semibold text-[var(--secondary-purple)]">
+              Unable to save your latest changes to the server. Your edits are only visible in this tab until the connection is restored.
+            </p>
+          ) : null}
         </header>
 
         <DndContext

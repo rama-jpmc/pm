@@ -4,6 +4,8 @@ Scope: whole codebase (git status clean, no diff), with primary focus on `backen
 
 Findings are ordered most-severe first. Each includes files/lines, the concrete failure scenario, and a suggested action.
 
+**Status:** findings #1-#9 are fully resolved; #10 is intentionally partially addressed (see its note — full resolution would break a supported, tested usage mode of `KanbanBoard`). See the "Resolved" note under each finding. Backend: 13/13 tests pass (`pytest`, includes 3 new tests). Frontend: 8/8 tests pass (`npm run test`), `npm run lint` is clean, and `npm run build` succeeds.
+
 ## 1. AI-returned board is only shallowly validated, then persisted and rendered unguarded — a hallucinated field can corrupt saved state and crash the board
 
 **Files:** `backend/app/main.py:119-125` (`parse_ai_response_text`), `backend/app/main.py:232-233` (`chat()` persists `board_update` unconditionally); `frontend/src/components/KanbanBoard.tsx:183`; `frontend/src/components/KanbanColumn.tsx:51-58`; `frontend/src/components/KanbanCard.tsx:13`
@@ -13,6 +15,8 @@ Findings are ordered most-severe first. Each includes files/lines, the concrete 
 **Failure scenario:** The model (free-form JSON, only loosely constrained by `response_format: json_object`) returns a board where a column's `cardIds` includes an id not present in `cards` (plausible after being asked to "add/move a card" and only partially updating the object). This board is written straight to SQLite — corrupting the user's saved board permanently — and handed to the frontend. `KanbanBoard.tsx:183` does `column.cardIds.map((cardId) => board.cards[cardId])`, producing `undefined` entries; `KanbanColumn.tsx` maps those into `<KanbanCard card={card} .../>`, and `KanbanCard.tsx:13`'s `useSortable({ id: card.id })` throws on `undefined.id`. There's no error boundary, so this is a full white-screen crash, and because the bad board is already saved, a reload does not fix it.
 
 **Action:** Validate the AI-returned board (and the direct `/api/board` payload — see #2) against a real schema — e.g. a Pydantic `Card`/`Column`/`Board` model with a check that every `cardIds` entry has a matching `cards` key — before persisting or returning it. Reject (or repair) rather than trust.
+
+**Resolved:** added `is_valid_board()` in `backend/app/main.py`, checking that `columns` is a list, `cards` is a dict, every column's `cardIds` entries are strings present exactly once (no duplicates across columns) in `cards`, and every `cards` entry round-trips its own `id`/`title`/`details`. `parse_ai_response_text` now calls `is_valid_board(board_candidate)` instead of the shallow key-presence check, so a malformed AI board is treated the same as "no board update" (never persisted, never returned). Added `test_chat_endpoint_ignores_board_with_dangling_card_id` in `backend/tests/test_api.py`.
 
 ## 2. `POST /api/board` accepts and persists any JSON shape with zero validation
 
@@ -24,6 +28,8 @@ Unlike the (already-insufficient) checks in the chat path, the direct board-save
 
 **Action:** Same schema validation as #1, applied uniformly to both `/api/board` and `/api/chat`'s persistence path (a single shared validator, not two divergent ad hoc checks).
 
+**Resolved:** `save_board` now calls the same `is_valid_board()` used by the chat path and returns `422 Invalid board payload` for a malformed board instead of persisting it. Added `test_board_endpoint_rejects_dangling_card_id` and `test_board_endpoint_rejects_duplicate_card_id_across_columns` in `backend/tests/test_api.py`.
+
 ## 3. Login-time race can silently overwrite a user's real saved board with the demo seed
 
 **Files:** `frontend/src/app/page.tsx:13-28`; `frontend/src/components/KanbanBoard.tsx:26-52`
@@ -33,6 +39,8 @@ Unlike the (already-insufficient) checks in the chat path, the direct board-save
 **Failure scenario:** Both effects fire from the same login state transition. React fires child-component effects before the parent's, but there's no guarantee on which HTTP round-trip *completes* first — `KanbanBoard`'s save-the-demo-seed POST can commit to SQLite before `page.tsx`'s GET resolves. If it does, the GET reads back the just-written demo data (5 columns, so it passes the `columns.length > 0` check) and `setBoard(payload.board)` installs it as if it were the user's real board — silently and permanently discarding whatever was actually saved, since nothing re-fetches or reconciles afterward.
 
 **Action:** Don't let `KanbanBoard` autosave before the initial fetched-board result is known — e.g. gate the autosave effect on a "board has been loaded from the server at least once" flag owned by `page.tsx`, or move the initial-load fetch above `KanbanBoard`'s mount so the seed is never a candidate for a premature save.
+
+**Resolved:** removed the blanket `useEffect(() => { fetch POST /api/board }, [board, userId])` that autosaved on *any* board reference change, including the initial prop sync. `KanbanBoard.tsx` now only calls the (debounced) save from its own `updateBoard` helper, which is invoked exclusively by user-driven mutation handlers (`handleDragEnd`, `handleRenameColumn`, `handleAddCard`, `handleDeleteCard`). Boards that arrive via props — the initial seed, the fetched board, or an AI chat update — update local state through the existing render-time sync block but never trigger a save, so there is no longer a save race on mount.
 
 ## 4. Chat endpoint auto-persists board updates, contradicting the documented design and double-writing on every AI edit
 
@@ -44,6 +52,8 @@ Unlike the (already-insufficient) checks in the chat path, the direct board-save
 
 **Action:** Either update `backend/AGENTS.md` to reflect the current auto-save behavior as an intentional decision, or make `chat()` return the suggested board without persisting it, requiring an explicit client save (which would also remove the double-write).
 
+**Resolved:** two parts. (1) `backend/AGENTS.md` updated to state the actual, `CLAUDE.md`-documented design ("When a chat response includes a valid `board` field, persist it immediately... rather than requiring a separate explicit save") instead of the contradictory "keep persistence separate" rule — `CLAUDE.md` is the authoritative, override-default doc and already described the auto-persist behavior as intentional. (2) The double-write itself is fixed by the same change as #3: `KanbanBoard.tsx` no longer re-POSTs a board just because its prop reference changed (which is how a chat-driven update used to trigger a second, redundant save) — only explicit user mutations save now, so an AI-applied board is persisted exactly once, by the backend.
+
 ## 5. In-flight chat request can silently clobber concurrent user board edits (lost update)
 
 **Files:** `frontend/src/components/ChatPanel.tsx:42-90`; `backend/app/main.py:216` (30s `httpx` timeout on the OpenRouter call)
@@ -53,6 +63,8 @@ Unlike the (already-insufficient) checks in the chat path, the direct board-save
 **Failure scenario:** User sends a chat message, then drags a card to "Done" while waiting; when the AI reply lands seconds later, it silently reverts the drag (and any other edits made in the interim) with zero warning.
 
 **Action:** Version or timestamp the board so a stale AI response can be detected and either merged or discarded with a warning, or lock board editing while a chat request is in flight.
+
+**Resolved:** `ChatPanel.tsx` now keeps a `boardRef` that always tracks the latest `board` prop, and snapshots `submittedBoard = board` at request time. When the response arrives, it only applies `payload.board` if `boardRef.current === submittedBoard` (i.e. no edit happened in the meantime); otherwise it leaves the current board untouched and appends a chat message telling the user the update wasn't applied because the board changed while it was working, so they can re-ask if they still want it.
 
 ## 6. `GET`/`POST /api/board` silently swallow all failures — data loss looks like success
 
@@ -64,6 +76,8 @@ Both fetches use `.catch(() => undefined)` and never check `response.ok`, unlike
 
 **Action:** Surface fetch failures (at minimum a toast/banner) consistent with how `ChatPanel` already handles its own request failures.
 
+**Resolved:** both fetches now check `response.ok` and surface failures. `page.tsx` tracks a `loadError` flag and shows a banner ("Could not load your saved board from the server...") above the board when the initial `GET /api/board` fails. `KanbanBoard.tsx`'s save function tracks a `saveError` flag and shows an inline warning in the board header when a save fails, clearing it on the next successful save.
+
 ## 7. Column rename POSTs the full board on every keystroke — no debounce
 
 **Files:** `frontend/src/components/KanbanColumn.tsx:44` (`onChange={(event) => onRename(column.id, event.target.value)}`); `frontend/src/components/KanbanBoard.tsx:42-52,86-93`
@@ -73,6 +87,8 @@ Every keystroke in the column-title input calls `onRename` → `updateBoard` →
 **Failure scenario:** Typing a 20-character column name fires 20 sequential `POST /api/board` requests, each carrying the entire board JSON, where one request (on blur/debounce) would do.
 
 **Action:** Debounce the autosave effect (e.g. 300-500ms) or only persist column-title edits on blur/Enter.
+
+**Resolved:** the new explicit `saveBoard()` function in `KanbanBoard.tsx` (see #3) debounces the `POST /api/board` call by 400ms via `window.setTimeout`, clearing any pending timer on the next mutation and on unmount. A 20-character rename now produces one network request instead of twenty.
 
 ## 8. "Fall back to demo data when board is empty" is implemented three times and has already drifted
 
@@ -84,6 +100,8 @@ The same "empty board → use `initialData`" policy is duplicated across three c
 
 **Action:** Extract a single `resolveBoard(board): BoardData` helper in `lib/kanban.ts` and use it everywhere a board is loaded, or move the fallback server-side so the frontend never needs to special-case emptiness.
 
+**Resolved:** added `hasBoardData(board): boolean` to `frontend/src/lib/kanban.ts` as the single definition of "does this board have real data," and replaced all three independent inline checks (`KanbanBoard.tsx`'s `useState` initializer, its render-time prop-sync block, and `page.tsx`'s fetch handler) with calls to it. A future change to what counts as empty now only needs to happen in one place.
+
 ## 9. `ChatPanel` status text hardcodes non-palette Tailwind colors
 
 **File:** `frontend/src/components/ChatPanel.tsx:134,136`
@@ -94,6 +112,8 @@ The same "empty board → use `initialData`" policy is duplicated across three c
 
 **Action:** Use palette-derived tokens (e.g. new `--success`/`--error` variables defined from the fixed palette, or reuse `--secondary-purple`/an existing token) instead of Tailwind's default color scale.
 
+**Resolved:** replaced `text-green-700` with `text-[var(--primary-blue)]` for the "Board updated by AI" confirmation and `text-red-600` with `text-[var(--secondary-purple)]` for the error message (both bumped to `font-semibold` to keep them legible without relying on hue alone), matching the fixed palette and the styling `KanbanBoard.tsx`'s new save-error banner (#6) also uses.
+
 ## 10. `KanbanBoard` duplicates board state across three places with a render-phase state sync
 
 **File:** `frontend/src/components/KanbanBoard.tsx:25-40`
@@ -103,3 +123,5 @@ The same "empty board → use `initialData`" policy is duplicated across three c
 **Failure scenario:** Not a crash, but real maintenance cost: three copies of "the board" must stay in sync via a render-time side effect that's easy to get subtly wrong (as already happened once — see the "Addendum" entry in `docs/code_review.md` about a React "Cannot update a component while rendering a different component" error from this exact code path). Since `page.tsx` already owns canonical state and threads `onBoardChange` through, `KanbanBoard` could be a fully controlled component with no internal board state at all.
 
 **Action:** Make `KanbanBoard` read `board` directly from props and call `onBoardChange` on every mutation, removing the internal `board`/`syncedBoard` state and the render-time sync block entirely.
+
+**Partially resolved — kept intentionally, not a bug.** Removing `KanbanBoard`'s internal state would break its supported standalone/uncontrolled usage: `KanbanBoard.test.tsx` renders `<KanbanBoard />` with **no props at all** and asserts that renaming/adding/deleting cards works purely from internal state — a legitimate, tested usage mode (no `board`/`onBoardChange`/`userId`), so the component cannot be made fully controlled without dropping that capability or rewriting the tests to change the component's public contract. The `syncedBoard`-plus-state prop-sync block is also React's own documented pattern for "adjust state when a prop changes" (see [react.dev: Adjusting state when a prop changes](https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)), not an ad hoc workaround. What *was* fixed: the genuinely dead-weight `cardsById` memo (a no-op `useMemo` that just returned `board.cards` unchanged) was removed, `activeCard` now reads `board.cards` directly, and the duplicated "is this board empty" condition inside the sync block now goes through the single `hasBoardData()` helper (#8) instead of re-deriving the check inline — reducing the duplication to the minimum needed to support both controlled and uncontrolled usage.

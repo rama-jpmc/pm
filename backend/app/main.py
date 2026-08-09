@@ -76,6 +76,41 @@ class ChatResponse(BaseModel):
     board: dict[str, Any] | None = None
 
 
+def is_valid_board(board: Any) -> bool:
+    """Validate the BoardData invariant: every column.cardIds entry must
+    reference a card that exists in `cards`, each card id must appear in at
+    most one column, and each card must round-trip its own id."""
+    if not isinstance(board, dict):
+        return False
+
+    columns = board.get("columns")
+    cards = board.get("cards")
+    if not isinstance(columns, list) or not isinstance(cards, dict):
+        return False
+
+    seen_card_ids: set[str] = set()
+    for column in columns:
+        if not isinstance(column, dict):
+            return False
+        if not isinstance(column.get("id"), str) or not isinstance(column.get("title"), str):
+            return False
+        card_ids = column.get("cardIds")
+        if not isinstance(card_ids, list):
+            return False
+        for card_id in card_ids:
+            if not isinstance(card_id, str) or card_id not in cards or card_id in seen_card_ids:
+                return False
+            seen_card_ids.add(card_id)
+
+    for card_id, card in cards.items():
+        if not isinstance(card, dict) or card.get("id") != card_id:
+            return False
+        if not isinstance(card.get("title"), str) or not isinstance(card.get("details"), str):
+            return False
+
+    return True
+
+
 def extract_json_object(raw_text: str) -> str | None:
     raw_text = raw_text.strip()
     start = raw_text.find("{")
@@ -119,7 +154,7 @@ def parse_ai_response_text(raw_text: str) -> tuple[str, dict[str, Any] | None]:
     if isinstance(payload, dict):
         assistant_message = str(payload.get("assistant_message", assistant_message)).strip()
         board_candidate = payload.get("board")
-        if isinstance(board_candidate, dict) and "columns" in board_candidate and "cards" in board_candidate:
+        if is_valid_board(board_candidate):
             board_update = board_candidate
 
     return assistant_message, board_update
@@ -166,6 +201,8 @@ def persist_board(user_id: str, board: dict[str, Any]) -> None:
 
 @app.post("/api/board")
 def save_board(payload: BoardPayload) -> dict[str, Any]:
+    if not is_valid_board(payload.board):
+        raise HTTPException(status_code=422, detail="Invalid board payload")
     persist_board(payload.user_id, payload.board)
     return {"status": "saved", "user_id": payload.user_id}
 

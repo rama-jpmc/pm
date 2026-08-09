@@ -33,6 +33,38 @@ def test_board_persistence_for_user():
     assert load_response.json()["board"]["columns"][0]["title"] == "Backlog"
 
 
+def test_board_endpoint_rejects_dangling_card_id():
+    payload = {
+        "user_id": "demo-invalid",
+        "board": {
+            "columns": [{"id": "col-1", "title": "Backlog", "cardIds": ["ghost"]}],
+            "cards": {},
+        },
+    }
+
+    response = client.post("/api/board", json=payload)
+    assert response.status_code == 422
+
+    load_response = client.get("/api/board", params={"user_id": "demo-invalid"})
+    assert load_response.json()["board"] == {"columns": [], "cards": {}}
+
+
+def test_board_endpoint_rejects_duplicate_card_id_across_columns():
+    payload = {
+        "user_id": "demo-duplicate",
+        "board": {
+            "columns": [
+                {"id": "col-1", "title": "Backlog", "cardIds": ["card-1"]},
+                {"id": "col-2", "title": "Done", "cardIds": ["card-1"]},
+            ],
+            "cards": {"card-1": {"id": "card-1", "title": "T", "details": "D"}},
+        },
+    }
+
+    response = client.post("/api/board", json=payload)
+    assert response.status_code == 422
+
+
 def test_chat_endpoint_parses_ai_response(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test")
 
@@ -228,6 +260,60 @@ def test_chat_endpoint_ignores_incomplete_board(monkeypatch):
     body = response.json()
     assert body["assistant_message"] == "Here you go"
     assert body["board"] is None
+
+
+def test_chat_endpoint_ignores_board_with_dangling_card_id(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+
+    def fake_post(*args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "assistant_message": "Added it",
+                                        "board": {
+                                            "columns": [
+                                                {
+                                                    "id": "col-1",
+                                                    "title": "Backlog",
+                                                    "cardIds": ["ghost-card"],
+                                                }
+                                            ],
+                                            "cards": {},
+                                        },
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "user_id": "demo-dangling-card",
+            "board": {"columns": [], "cards": {}},
+            "messages": [{"role": "user", "content": "add a card"}],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["assistant_message"] == "Added it"
+    assert body["board"] is None
+
+    persisted_response = client.get("/api/board", params={"user_id": "demo-dangling-card"})
+    assert persisted_response.json()["board"] == {"columns": [], "cards": {}}
 
 
 def test_chat_endpoint_handles_upstream_connection_error(monkeypatch):

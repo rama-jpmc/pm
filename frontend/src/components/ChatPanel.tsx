@@ -25,6 +25,11 @@ export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
   const [error, setError] = useState<string | null>(null);
   const [boardUpdated, setBoardUpdated] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const boardRef = useRef(board);
+
+  useEffect(() => {
+    boardRef.current = board;
+  }, [board]);
 
   useEffect(() => {
     if (!boardUpdated) {
@@ -57,6 +62,11 @@ export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
       return;
     }
 
+    // Snapshot the board this request is reasoning about, so we can tell
+    // if the user edits the board while the request is in flight (the
+    // OpenRouter round trip can take up to ~30s) and avoid clobbering
+    // those edits with a suggestion computed from stale state.
+    const submittedBoard = board;
     setIsLoading(true);
 
     try {
@@ -85,8 +95,19 @@ export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
       ]);
 
       if (payload.board) {
-        onBoardUpdate(payload.board);
-        setBoardUpdated(true);
+        if (boardRef.current === submittedBoard) {
+          onBoardUpdate(payload.board);
+          setBoardUpdated(true);
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: prev.length + 1,
+              role: "assistant",
+              text: "The board changed while I was working, so I didn't apply this update automatically. Ask again if you'd still like it applied.",
+            },
+          ]);
+        }
       }
     } catch (fetchError) {
       const message = fetchError instanceof Error ? fetchError.message : "Unknown error";
@@ -131,9 +152,11 @@ export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
         </button>
       </form>
       {boardUpdated ? (
-        <p className="mt-3 text-sm text-green-700">Board updated by AI.</p>
+        <p className="mt-3 text-sm font-semibold text-[var(--primary-blue)]">Board updated by AI.</p>
       ) : null}
-      {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 text-sm font-semibold text-[var(--secondary-purple)]">{error}</p>
+      ) : null}
     </aside>
   );
 };

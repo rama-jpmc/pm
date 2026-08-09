@@ -71,6 +71,9 @@ export const initialData: BoardData = {
   },
 };
 
+export const hasBoardData = (board?: BoardData | null): boolean =>
+  !!board && board.columns.length > 0;
+
 const isColumnId = (columns: Column[], id: string) =>
   columns.some((column) => column.id === id);
 
