@@ -122,9 +122,9 @@ export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
   };
 
   return (
-    <aside className="rounded-[32px] border border-[var(--stroke)] bg-white/80 p-4 shadow-[var(--shadow)] backdrop-blur">
+    <aside className="flex max-h-[calc(100vh-3rem)] flex-col rounded-[32px] border border-[var(--stroke)] bg-white/80 p-4 shadow-[var(--shadow)] backdrop-blur">
       <h2 className="font-display text-xl font-semibold text-[var(--navy-dark)]">Assistant</h2>
-      <div className="mt-4 flex h-72 flex-col gap-3 overflow-y-auto rounded-2xl bg-[var(--surface)] p-3">
+      <div className="mt-4 flex h-[420px] flex-1 flex-col gap-3 overflow-y-auto rounded-2xl bg-[var(--surface)] p-3">
         {messages.map((message) => (
           <div
             key={message.id}
