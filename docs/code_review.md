@@ -2,7 +2,7 @@
 
 Full-repo review of the Project Management MVP (backend, frontend, Docker/deploy, tests, docs) as of the current `main` branch. Findings are ordered by severity within each section; each includes the affected file(s) and a concrete recommended action.
 
-**Status:** Items #1-#4 and #10 (the full "Suggested action order" steps 1-2) have been fixed and verified — see the "Resolved" note under each. Everything else below is still open.
+**Status:** all five steps of the "Suggested action order" are complete — items #1-#6, #8-#11, and #14 have been fixed and verified (see the "Resolved" note under each). Remaining open items: #7 (no real auth — accepted MVP limitation), #12 (Dockerfile not using `uv`), #13 (no logout/session persistence), #15 (sync blocking calls — fine at MVP scale).
 
 ## Summary
 
@@ -44,9 +44,13 @@ The `Dockerfile` (`backend/../Dockerfile:16`) does `COPY . .` with no `.dockerig
 `frontend/src/app/page.tsx` seeds `board` as `{columns: [], cards: {}}` and only updates it from the `GET /api/board` response. `backend/app/main.py:138-142` returns exactly that empty shape for a user with no saved board yet. Meanwhile `KanbanBoard.tsx:27-32` privately falls back to the demo `initialData` (5 populated columns) whenever the board it's handed is empty — but that fallback only updates `KanbanBoard`'s own internal state; it's never reported back up to `page.tsx` via `onBoardChange` (that only fires from user-initiated actions in `updateBoard`, `KanbanBoard.tsx:53-59`). Until the user drags/renames/adds/deletes something, `page.tsx`'s `board` state — and therefore what `ChatPanel` sends as board context to the AI — stays `{columns: [], cards: {}}`, even though the screen is showing 5 populated columns. Any AI request made before the user's first board edit will be reasoning about a board the user doesn't actually see.
 **Action:** lift the `initialData` fallback out of `KanbanBoard` and into `page.tsx` (or have `KanbanBoard` call `onBoardChange` once on mount when it applies the fallback), so all three components (`page.tsx`, `KanbanBoard`, `ChatPanel`) agree on the same board state from the start.
 
+**Resolved:** `page.tsx` now seeds `board` with `initialData` directly and only overrides it from the fetch when the returned board is non-empty, so `page.tsx`/`KanbanBoard`/`ChatPanel` all agree on the same board from the first render, whether or not the backend has a saved board yet. While in `KanbanBoard.tsx`, also fixed a related lint error (`react-hooks/set-state-in-effect`) surfaced by `npm run lint` in the same prop-sync code — replaced the effect-based `setBoard(initialBoard)` with React's recommended render-time state-adjustment pattern.
+
 ### 6. Overly permissive CORS config
 `backend/app/main.py:46-52` sets `allow_origins=["*"]` together with `allow_credentials=True`. Nothing in this app actually uses cookies or credentialed requests (`user_id` is passed as a plain JSON field, not a session cookie), so `allow_credentials=True` buys nothing but does force Starlette into reflecting the request's `Origin` header instead of a literal wildcard, which is a more permissive posture than necessary.
 **Action:** drop `allow_credentials=True` (unused), and once a deployment target is known, scope `allow_origins` to the actual frontend origin(s) instead of `"*"`.
+
+**Resolved:** removed `allow_credentials=True` from the `CORSMiddleware` config in `backend/app/main.py`. Scoping `allow_origins` beyond `"*"` is left open until a real deployment target is known.
 
 ### 7. No real authentication on the backend
 Every `/api/board` and `/api/chat` call trusts a client-supplied `user_id` with no session/token verification (`backend/app/main.py:130-231`) — anyone who can reach the backend can read or overwrite any other user's board by simply choosing their `user_id`. This is explicitly called out as an accepted MVP limitation in `AGENTS.md` ("only a user sign in hardcoded... database will support multiple users for future"), so it's not a bug relative to current scope, but it's worth flagging now since it's the most consequential thing to fix before this runs anywhere beyond a single trusted local machine.
@@ -56,9 +60,13 @@ Every `/api/board` and `/api/chat` call trusts a client-supplied `user_id` with 
 `extract_json_object`/`parse_ai_response_text` (`backend/app/main.py:76-122`) find the *first* `{`...`}` blob in the model's raw text and try to parse it as the whole response. This works for the tests' hand-crafted mock output, but the OpenRouter request (`backend/app/main.py:199-213`) doesn't use a strict JSON mode / `response_format` constraint, so nothing stops the real model from prefacing its JSON with prose, or from including an unrelated `{...}` example in its explanation, both of which would either silently drop a real board update or misparse a wrong stand-in object as the board.
 **Action:** once #1/#2 are fixed and the endpoint can be exercised against a live model, add `response_format: {"type": "json_object"}` (OpenRouter/OpenAI-compatible models support this) to the request payload so the model is constrained to return JSON only, simplifying the parsing.
 
+**Resolved:** added `"response_format": {"type": "json_object"}` to the OpenRouter request payload in `backend/app/main.py`. Verified with a live `POST /api/chat` call (200, valid response) after the change. The manual brace-matching in `extract_json_object`/`parse_ai_response_text` was left in place as a defense-in-depth fallback rather than removed.
+
 ### 9. Hardcoded API base URL duplicated in three places
 `API_BASE = "http://127.0.0.1:8000"` is independently defined in `frontend/src/app/page.tsx:9`, `frontend/src/components/KanbanBoard.tsx:24`, and `frontend/src/components/ChatPanel.tsx:18`. This works for the specific case where frontend and backend are both on localhost with those exact ports, but it's easy for the three to drift, and it can't be overridden per-environment without editing source.
 **Action:** extract a single shared constant (e.g. `frontend/src/lib/config.ts`) or read from `process.env.NEXT_PUBLIC_API_BASE` with a localhost fallback, and import it in all three places.
+
+**Resolved:** added `frontend/src/lib/config.ts` exporting `API_BASE` (reads `process.env.NEXT_PUBLIC_API_BASE`, falls back to `http://127.0.0.1:8000`), and updated `page.tsx`, `KanbanBoard.tsx`, and `ChatPanel.tsx` to import it instead of each defining their own copy.
 
 ## Low / nits
 
@@ -72,6 +80,8 @@ Every `/api/board` and `/api/chat` call trusts a client-supplied `user_id` with 
 It lists only `page.tsx`, `KanbanBoard.tsx`, `KanbanColumn.tsx`, `NewCardForm.tsx`, and `lib/kanban.ts` under "Current structure" — it's missing `ChatPanel.tsx`, `LoginScreen.tsx`, `KanbanCard.tsx`, and `KanbanCardPreview.tsx`, all of which now exist and are tested.
 **Action:** update the file list to match the current `src/components/` contents.
 
+**Resolved:** `frontend/AGENTS.md` now lists all current components (`LoginScreen.tsx`, `KanbanCard.tsx`, `KanbanCardPreview.tsx`, `ChatPanel.tsx`) plus the new `lib/config.ts`.
+
 ### 12. Dockerfile doesn't use `uv` as instructed
 `AGENTS.md` explicitly says: "Use 'uv' as the package manager for python in the Docker container." The `Dockerfile` instead does a plain `pip install --no-cache-dir -r backend/requirements.txt` (`Dockerfile:11`). Not a functional bug, but a direct deviation from a stated technical decision.
 **Action:** either switch the Dockerfile to install/run via `uv`, or update `AGENTS.md` if the plain-pip approach is now the intended decision.
@@ -83,13 +93,30 @@ Auth state lives only in React state (`frontend/src/app/page.tsx`), so a page re
 `backend/tests/test_api.py::test_chat_endpoint_parses_ai_response` only covers the happy path (well-formed JSON with both `assistant_message` and a valid `board`). There's no test for: a plain-text (non-JSON) assistant reply, malformed/truncated JSON, a `board` missing `columns` or `cards`, or the upstream OpenRouter call itself failing (non-200 status, connection error) — all of which have dedicated code paths in `backend/app/main.py` (`extract_json_object` returning `None`, the `httpx.HTTPError` handler, the `response.status_code != 200` branch) that currently execute only in production, never in CI.
 **Action:** add 3-4 focused unit tests for these branches; they're cheap given the existing `monkeypatch.setattr(httpx, "post", fake_post)` pattern already in the file.
 
+**Resolved:** added 7 new tests to `backend/tests/test_api.py`: correct-URL regression test (pins the fix from #1), missing API key (500), plain-text response, malformed/truncated JSON, board missing `columns`/`cards` keys, upstream connection error (502), and non-200 upstream status (502). Full suite is now 10 tests, all passing.
+
 ### 15. Sync blocking calls inside FastAPI request handlers
 `chat()` and the SQLite helpers in `backend/app/main.py` are plain `def` (not `async def`), so FastAPI runs them in a threadpool — functionally fine, but the ~30s timeout on the OpenRouter call (`backend/app/main.py:212`) ties up one worker thread per concurrent chat request. Not an issue at MVP/local scale; worth knowing if this ever needs to handle concurrent users.
 
 ## Suggested action order
 
-1. Fix the OpenRouter URL and actually wire `OPENROUTER_API_KEY` through (`docker-compose.yml` + local dev), then verify one real chat round-trip manually. (#1, #2)
-2. Add `.dockerignore`; untrack `backend/data/kanban.db` and `frontend/test-results/.last-run.json`, and gitignore both. (#3, #4, #10)
-3. Fix the board state-sync gap between `page.tsx`, `KanbanBoard`, and `ChatPanel` so the AI always sees what's on screen. (#5)
-4. Quick cleanups: drop unused `allow_credentials`, dedupe `API_BASE`, refresh `frontend/AGENTS.md`. (#6, #9, #11)
-5. Once live chat is verified, add `response_format: json_object` and the missing failure-path tests. (#8, #14)
+1. ~~Fix the OpenRouter URL and actually wire `OPENROUTER_API_KEY` through (`docker-compose.yml` + local dev), then verify one real chat round-trip manually. (#1, #2)~~ Done.
+2. ~~Add `.dockerignore`; untrack `backend/data/kanban.db` and `frontend/test-results/.last-run.json`, and gitignore both. (#3, #4, #10)~~ Done.
+3. ~~Fix the board state-sync gap between `page.tsx`, `KanbanBoard`, and `ChatPanel` so the AI always sees what's on screen. (#5)~~ Done.
+4. ~~Quick cleanups: drop unused `allow_credentials`, dedupe `API_BASE`, refresh `frontend/AGENTS.md`. (#6, #9, #11)~~ Done.
+5. ~~Once live chat is verified, add `response_format: json_object` and the missing failure-path tests. (#8, #14)~~ Done.
+
+## Addendum: found and fixed during action 3
+
+Not in the original review — surfaced live in the browser after the action-3 state-sync fix (React console error: "Cannot update a component ('Home') while rendering a different component ('KanbanBoard')").
+
+`KanbanBoard.tsx`'s `updateBoard` called `onBoardChange?.(next)` (the parent `Home` component's setter) from *inside* the functional updater passed to its own `setBoard`. React runs that updater during `KanbanBoard`'s render/reconciliation, so updating a different component's state from within it is invalid — pre-existing since this call site predates today's session, just not previously triggered by the tests we run (Playwright's mouse-drag e2e test didn't happen to catch the console error; Vitest doesn't drive real drag/rename/add interactions end-to-end the way this needed).
+
+**Resolved:** `updateBoard` now computes `next` and calls `setBoard(next)` / `onBoardChange?.(next)` directly (using the closed-over `board` value) instead of inside a `setBoard` updater callback — safe because `updateBoard` is only ever invoked from event handlers, never during render. Verified with a scripted Playwright run driving login, column rename, add-card, and drag-and-drop while listening for console errors — zero errors captured (previously reproduced the exact error from the report).
+
+## Remaining open items
+
+- **#7** No real authentication — accepted MVP limitation per `AGENTS.md`; revisit when real multi-user support lands.
+- **#12** `Dockerfile` uses plain `pip` instead of `uv`, deviating from `AGENTS.md`'s stated technical decision.
+- **#13** No logout / session persistence across page refresh.
+- **#15** Sync blocking calls in FastAPI handlers — fine at MVP/local scale, worth revisiting if concurrent usage grows.

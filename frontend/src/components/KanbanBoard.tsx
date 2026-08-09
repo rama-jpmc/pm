@@ -13,6 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import { API_BASE } from "@/lib/config";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
 type KanbanBoardProps = {
@@ -20,8 +21,6 @@ type KanbanBoardProps = {
   userId?: string | null;
   onBoardChange?: (board: BoardData) => void;
 };
-
-const API_BASE = "http://127.0.0.1:8000";
 
 export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() => {
@@ -31,12 +30,14 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
     return initialData;
   });
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [syncedBoard, setSyncedBoard] = useState(initialBoard);
 
-  useEffect(() => {
+  if (initialBoard !== syncedBoard) {
+    setSyncedBoard(initialBoard);
     if (initialBoard && initialBoard.columns.length > 0) {
       setBoard(initialBoard);
     }
-  }, [initialBoard]);
+  }
 
   useEffect(() => {
     if (!userId || !board.columns.length) {
@@ -51,11 +52,9 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
   }, [board, userId]);
 
   const updateBoard = (updater: (prev: BoardData) => BoardData) => {
-    setBoard((prev) => {
-      const next = updater(prev);
-      onBoardChange?.(next);
-      return next;
-    });
+    const next = updater(board);
+    setBoard(next);
+    onBoardChange?.(next);
   };
 
   const sensors = useSensors(

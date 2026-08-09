@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-A single-user-at-a-time Project Management MVP: a Kanban board with drag-and-drop, backed by a FastAPI + SQLite backend, with an AI chat sidebar (OpenRouter) that can create/edit/move cards. See `AGENTS.md` for full business requirements and `docs/PLAN.md` for current implementation status (source of truth for what's done vs. still pending — as of writing, AI chat connectivity in Part 8-10 is not yet implemented; the chat endpoint exists but structured board-update parsing is unverified end-to-end).
+A single-user-at-a-time Project Management MVP: a Kanban board with drag-and-drop, backed by a FastAPI + SQLite backend, with an AI chat sidebar (OpenRouter) that can create/edit/move cards. See `AGENTS.md` for full business requirements, `docs/PLAN.md` for current implementation status, and `docs/code_review.md` for a full-repo review with a resolved/open action list.
 
 MVP scope: hardcoded login (`user`/`password`), one board per user, runs locally via Docker.
 
@@ -43,17 +43,18 @@ The backend serves the built frontend as static files at `/` (mounted from `fron
 
 ## Architecture
 
-**Two independently-runnable halves, joined at deploy time.** In dev, the Next.js frontend (port 3000) talks to the FastAPI backend (port 8000, hardcoded as `API_BASE` in `frontend/src/app/page.tsx`) over plain fetch calls with CORS wide open. In the Docker build, the frontend is compiled to a static export (`next build` → `frontend/out/`) and FastAPI mounts it at `/` via `StaticFiles`, so the whole app is served from a single port 8000 container.
+**Two independently-runnable halves, joined at deploy time.** In dev, the Next.js frontend (port 3000) talks to the FastAPI backend (port 8000, via the shared `API_BASE` constant in `frontend/src/lib/config.ts`, overridable with `NEXT_PUBLIC_API_BASE`) over plain fetch calls with CORS wide open. In the Docker build, the frontend is compiled to a static export (`next build` → `frontend/out/`) and FastAPI mounts it at `/` via `StaticFiles`, so the whole app is served from a single port 8000 container.
 
 **Backend (`backend/app/main.py`)** is a single-file FastAPI app:
 - SQLite (`backend/data/kanban.db`, auto-created) has one table `boards(user_id PRIMARY KEY, board_json, updated_at)` — the entire board (columns + cards) is stored as one JSON blob per user, not normalized.
 - `GET/POST /api/board` — load/save the board JSON for a `user_id`.
-- `POST /api/chat` — sends board state + conversation history to OpenRouter (`openai/gpt-oss-120b`, requires `OPENROUTER_API_KEY` env var), asks the model to return JSON with `assistant_message` and an optional `board` field. `extract_json_object`/`parse_ai_response_text` do manual brace-matching to pull a JSON object out of the raw model text (not a strict JSON-mode call). If the model includes a `board` field with both `columns` and `cards` keys, that board is persisted immediately — chat-driven board updates are saved as a side effect of the chat call, not a separate explicit save.
+- `POST /api/chat` — sends board state + conversation history to OpenRouter (`openai/gpt-oss-120b`, requires `OPENROUTER_API_KEY`, loaded from a project-root `.env` via `python-dotenv`), requesting `response_format: json_object` so the model returns `assistant_message` and an optional `board` field. `extract_json_object`/`parse_ai_response_text` do manual brace-matching to pull the JSON object out of the raw model text as a defense-in-depth fallback. If the model includes a `board` field with both `columns` and `cards` keys, that board is persisted immediately — chat-driven board updates are saved as a side effect of the chat call, not a separate explicit save.
 - No real auth: `user_id` is passed by the client on every request; login is a frontend-only mock.
 
 **Frontend (`frontend/src/`)** is Next.js App Router + TypeScript, static-exported:
 - `lib/kanban.ts` — the board data model (`BoardData` = `{ columns: Column[], cards: Record<string, Card> }`) and pure functions like `moveCard` that reassign cards between/within columns given a drag source/target id. This is the one place that understands drag-and-drop reordering semantics; UI components call into it rather than mutating column/card arrays directly.
-- `app/page.tsx` — top-level state owner: holds `board`/`userId`/auth state, fetches the board from the backend on login, and passes `board`/`onBoardChange` down to both `KanbanBoard` and `ChatPanel` so either one can update shared board state.
+- `lib/config.ts` — the single shared `API_BASE` constant; all fetch calls import from here rather than hardcoding the backend origin.
+- `app/page.tsx` — top-level state owner: seeds `board` with the local demo data (`initialData`), fetches the real saved board from the backend on login (overriding the seed only if it's non-empty), and passes `board`/`onBoardChange` down to both `KanbanBoard` and `ChatPanel` so either one can update shared board state and the chat sidebar's context always matches what's on screen.
 - `components/KanbanBoard.tsx` + `KanbanColumn.tsx` + `KanbanCard.tsx`/`KanbanCardPreview.tsx` — board rendering and `@dnd-kit`-based drag-and-drop.
 - `components/ChatPanel.tsx` — chat sidebar; calls `/api/chat` and applies any returned `board` to shared state via `onBoardUpdate`.
 - `components/LoginScreen.tsx` — mock credential gate.

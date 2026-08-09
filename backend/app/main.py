@@ -50,7 +50,6 @@ app = FastAPI(title="Project Management MVP API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -212,6 +211,7 @@ def chat(payload: ChatRequest) -> ChatResponse:
                 ],
                 "temperature": 0.3,
                 "max_tokens": 800,
+                "response_format": {"type": "json_object"},
             },
             timeout=30.0,
         )

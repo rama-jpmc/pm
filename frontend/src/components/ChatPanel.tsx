@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { API_BASE } from "@/lib/config";
 import type { BoardData } from "@/lib/kanban";
 
 type Message = {
@@ -14,8 +15,6 @@ type ChatPanelProps = {
   userId: string | null;
   onBoardUpdate: (board: BoardData) => void;
 };
-
-const API_BASE = "http://127.0.0.1:8000";
 
 export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
   const [messages, setMessages] = useState<Message[]>([

@@ -4,14 +4,13 @@ import { useEffect, useState } from "react";
 import { ChatPanel } from "@/components/ChatPanel";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { LoginScreen } from "@/components/LoginScreen";
-import type { BoardData } from "@/lib/kanban";
-
-const API_BASE = "http://127.0.0.1:8000";
+import { API_BASE } from "@/lib/config";
+import { initialData, type BoardData } from "@/lib/kanban";
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-  const [board, setBoard] = useState<BoardData>({ columns: [], cards: {} });
+  const [board, setBoard] = useState<BoardData>(initialData);
 
   useEffect(() => {
     if (!userId) {
@@ -21,7 +20,7 @@ export default function Home() {
     fetch(`${API_BASE}/api/board?user_id=${encodeURIComponent(userId)}`)
       .then((response) => response.json())
       .then((payload) => {
-        if (payload.board) {
+        if (payload.board && payload.board.columns.length > 0) {
           setBoard(payload.board);
         }
       })
