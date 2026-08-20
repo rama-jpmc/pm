@@ -11,26 +11,37 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { Plus, Search } from "lucide-react";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
-import { API_BASE } from "@/lib/config";
-import { createId, hasBoardData, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import type { CardEdits } from "@/components/KanbanCard";
+import { updateBoard as saveBoardToApi } from "@/lib/api";
+import {
+  createId,
+  hasBoardData,
+  initialData,
+  moveCard,
+  type BoardData,
+  type Priority,
+} from "@/lib/kanban";
 
 type KanbanBoardProps = {
   board: BoardData;
-  userId?: string | null;
+  boardId?: string | null;
+  token?: string | null;
   onBoardChange?: (board: BoardData) => void;
 };
 
 const SAVE_DEBOUNCE_MS = 400;
 
-export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: KanbanBoardProps) => {
+export const KanbanBoard = ({ board: initialBoard, boardId, token, onBoardChange }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData>(() =>
     hasBoardData(initialBoard) ? initialBoard : initialData
   );
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [syncedBoard, setSyncedBoard] = useState(initialBoard);
   const [saveError, setSaveError] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const saveTimerRef = useRef<number | null>(null);
 
   if (initialBoard !== syncedBoard) {
@@ -55,7 +66,7 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
   // above, so boards that arrive via props (initial load, AI chat updates)
   // are never redundantly re-saved.
   const saveBoard = (next: BoardData) => {
-    if (!userId) {
+    if (!token || !boardId) {
       return;
     }
 
@@ -64,17 +75,8 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
     }
 
     saveTimerRef.current = window.setTimeout(() => {
-      fetch(`${API_BASE}/api/board`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, board: next }),
-      })
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`Failed to save board: ${response.status}`);
-          }
-          setSaveError(false);
-        })
+      saveBoardToApi(token, boardId, { board: next })
+        .then(() => setSaveError(false))
         .catch(() => setSaveError(true));
     }, SAVE_DEBOUNCE_MS);
   };
@@ -119,13 +121,19 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
     }));
   };
 
-  const handleAddCard = (columnId: string, title: string, details: string) => {
+  const handleAddCard = (
+    columnId: string,
+    title: string,
+    details: string,
+    priority: Priority,
+    dueDate: string | null
+  ) => {
     const id = createId("card");
     updateBoard((prev) => ({
       ...prev,
       cards: {
         ...prev.cards,
-        [id]: { id, title, details: details || "No details yet." },
+        [id]: { id, title, details: details || "No details yet.", priority, dueDate },
       },
       columns: prev.columns.map((column) =>
         column.id === columnId
@@ -152,6 +160,50 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
     }));
   };
 
+  const handleEditCard = (cardId: string, updates: CardEdits) => {
+    updateBoard((prev) => ({
+      ...prev,
+      cards: {
+        ...prev.cards,
+        [cardId]: { ...prev.cards[cardId], ...updates },
+      },
+    }));
+  };
+
+  const handleAddColumn = () => {
+    const title = window.prompt("Name your new column", "New column");
+    if (!title || !title.trim()) {
+      return;
+    }
+    const id = createId("col");
+    updateBoard((prev) => ({
+      ...prev,
+      columns: [...prev.columns, { id, title: title.trim(), cardIds: [] }],
+    }));
+  };
+
+  const handleDeleteColumn = (columnId: string) => {
+    updateBoard((prev) => {
+      const column = prev.columns.find((existing) => existing.id === columnId);
+      const cardIdsToRemove = new Set(column?.cardIds ?? []);
+      return {
+        columns: prev.columns.filter((existing) => existing.id !== columnId),
+        cards: Object.fromEntries(
+          Object.entries(prev.cards).filter(([id]) => !cardIdsToRemove.has(id))
+        ),
+      };
+    });
+  };
+
+  const matchesSearch = (cardId: string) => {
+    if (!searchQuery.trim()) {
+      return true;
+    }
+    return board.cards[cardId]?.title
+      .toLowerCase()
+      .includes(searchQuery.trim().toLowerCase());
+  };
+
   const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
@@ -159,23 +211,33 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
       <header className="flex flex-col gap-4 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-6 shadow-[var(--shadow)] backdrop-blur @2xl:flex-row @2xl:items-center @2xl:justify-between @2xl:gap-8">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[var(--gray-text)]">
-            Single Board Kanban
+            Kanban Board
           </p>
           <h1 className="mt-2 font-display text-3xl font-semibold text-[var(--navy-dark)]">
             Kanban Studio
           </h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {board.columns.map((column) => (
-            <div
-              key={column.id}
-              className="flex items-center gap-2 rounded-full border border-[var(--stroke)] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--navy-dark)]"
-            >
-              <span className="h-2 w-2 flex-shrink-0 rounded-full bg-[var(--accent-yellow)]" />
-              {column.title}
-              <span className="text-[var(--gray-text)]">{column.cardIds.length}</span>
-            </div>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative">
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--gray-text)]"
+            />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search cards"
+              aria-label="Search cards"
+              className="rounded-full border border-[var(--stroke)] bg-white py-1.5 pl-8 pr-3 text-xs font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleAddColumn}
+            className="flex items-center gap-1 rounded-full bg-[var(--secondary-purple)] px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-white"
+          >
+            <Plus size={14} /> Add column
+          </button>
         </div>
       </header>
 
@@ -196,10 +258,12 @@ export const KanbanBoard = ({ board: initialBoard, userId, onBoardChange }: Kanb
             <KanbanColumn
               key={column.id}
               column={column}
-              cards={column.cardIds.map((cardId) => board.cards[cardId])}
+              cards={column.cardIds.filter(matchesSearch).map((cardId) => board.cards[cardId])}
               onRename={handleRenameColumn}
               onAddCard={handleAddCard}
               onDeleteCard={handleDeleteCard}
+              onEditCard={handleEditCard}
+              onDeleteColumn={handleDeleteColumn}
             />
           ))}
         </section>

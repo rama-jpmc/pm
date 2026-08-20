@@ -18,3 +18,4 @@ export const KanbanCardPreview = ({ card }: KanbanCardPreviewProps) => (
     </div>
   </article>
 );
+

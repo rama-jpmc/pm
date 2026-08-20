@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { API_BASE } from "@/lib/config";
+import { sendChatMessage } from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
 
 type Message = {
@@ -12,11 +12,12 @@ type Message = {
 
 type ChatPanelProps = {
   board: BoardData;
-  userId: string | null;
+  boardId: string | null;
+  token: string | null;
   onBoardUpdate: (board: BoardData) => void;
 };
 
-export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
+export const ChatPanel = ({ board, boardId, token, onBoardUpdate }: ChatPanelProps) => {
   const [messages, setMessages] = useState<Message[]>([
     { id: 1, role: "assistant", text: "Hello! I can help review the board." },
   ]);
@@ -57,7 +58,7 @@ export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
     setDraft("");
     setError(null);
 
-    if (!userId) {
+    if (!token || !boardId) {
       setError("Unable to send message without a signed-in user.");
       return;
     }
@@ -70,25 +71,13 @@ export const ChatPanel = ({ board, userId, onBoardUpdate }: ChatPanelProps) => {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          board,
-          messages: nextMessages.map((message) => ({
-            role: message.role,
-            content: message.text,
-          })),
-        }),
-      });
+      const payload = await sendChatMessage(
+        token,
+        boardId,
+        board,
+        nextMessages.map((message) => ({ role: message.role, content: message.text }))
+      );
 
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Chat request failed: ${response.status} ${body}`);
-      }
-
-      const payload = await response.json();
       setMessages((prev) => [
         ...prev,
         { id: prev.length + 1, role: "assistant", text: payload.assistant_message },

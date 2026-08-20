@@ -1,7 +1,11 @@
+export type Priority = "low" | "medium" | "high";
+
 export type Card = {
   id: string;
   title: string;
   details: string;
+  priority?: Priority;
+  dueDate?: string | null;
 };
 
 export type Column = {
@@ -32,11 +36,14 @@ export const initialData: BoardData = {
       id: "card-1",
       title: "Align roadmap themes",
       details: "Draft quarterly themes with impact statements and metrics.",
+      priority: "high",
+      dueDate: "2026-08-21",
     },
     "card-2": {
       id: "card-2",
       title: "Gather customer signals",
       details: "Review support tags, sales notes, and churn feedback.",
+      priority: "medium",
     },
     "card-3": {
       id: "card-3",
@@ -47,6 +54,7 @@ export const initialData: BoardData = {
       id: "card-4",
       title: "Refine status language",
       details: "Standardize column labels and tone across the board.",
+      priority: "low",
     },
     "card-5": {
       id: "card-5",
@@ -57,6 +65,8 @@ export const initialData: BoardData = {
       id: "card-6",
       title: "QA micro-interactions",
       details: "Verify hover, focus, and loading states.",
+      priority: "medium",
+      dueDate: "2026-08-18",
     },
     "card-7": {
       id: "card-7",

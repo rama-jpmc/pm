@@ -3,17 +3,18 @@
 ## Business Requirements
 
 This project is building a Project Management App. Key features:
-- A user can sign in
-- When signed in, the user sees a Kanban board representing their project
-- The Kanban board has fixed columns that can be renamed
-- The cards on the Kanban board can be moved with drag and drop, and edited
-- There is an AI chat feature in a sidebar; the AI is able to create / edit / move one or more cards
+- A user can register an account, sign in with a username and password, and change their password
+- Each user can own multiple Kanban boards, and can create, rename, switch between, and delete boards
+- A board owner can share a board with another registered user by username; the shared user can view and edit the board's content but cannot delete it or manage its collaborators
+- When signed in, the user sees their selected Kanban board
+- The Kanban board's columns can be renamed, added, and deleted
+- Cards can be moved with drag and drop, edited, and given a priority (low/medium/high) and an optional due date
+- A search box filters the visible cards on the active board by title
+- There is an AI chat feature in a sidebar; the AI is able to create / edit / move one or more cards on the currently selected board
 
 ## Limitations
 
-For the MVP, there will only be a user sign in (hardcoded to 'user' and 'password') but the database will support multiple users for future.
-
-For the MVP, there will only be 1 Kanban board per signed in user.
+User accounts are real (registered with a hashed password and a server-issued session token), but auth is intentionally lightweight for local, single-machine use: no email verification, password reset, or role/permission system.
 
 For the MVP, this will run locally (in a docker container)
 
@@ -26,6 +27,7 @@ For the MVP, this will run locally (in a docker container)
 - Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
 - Use `openai/gpt-oss-120b` as the model
 - Use SQLLite local database for the database, creating a new db if it doesn't exist
+- Passwords are hashed with bcrypt; sessions are opaque server-issued tokens stored in a `sessions` table and sent by the client as a `Bearer` token
 - Start and Stop server scripts for Mac, PC, Linux in scripts/
 
 ## Starting Point
