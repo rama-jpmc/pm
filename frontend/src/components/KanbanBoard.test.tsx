@@ -52,14 +52,14 @@ describe("KanbanBoard", () => {
     await userEvent.type(within(column).getByPlaceholderText(/card title/i), "Urgent task");
     await userEvent.selectOptions(within(column).getByLabelText("Priority"), "high");
     const dueDateInput = within(column).getByLabelText("Due date");
-    await userEvent.type(dueDateInput, "2026-09-01");
+    await userEvent.type(dueDateInput, "2099-09-01");
 
     await userEvent.click(within(column).getByRole("button", { name: /add card/i }));
 
     const newCard = within(column).getByText("Urgent task").closest("article");
     expect(newCard).not.toBeNull();
     expect(within(newCard as HTMLElement).getByText("high")).toBeInTheDocument();
-    expect(within(newCard as HTMLElement).getByText("Due 2026-09-01")).toBeInTheDocument();
+    expect(within(newCard as HTMLElement).getByText("Due 2099-09-01")).toBeInTheDocument();
   });
 
   it("adds a new column via the header control", async () => {
@@ -98,14 +98,14 @@ describe("KanbanBoard", () => {
     await userEvent.type(titleInput, "Gather signals (updated)");
 
     await userEvent.selectOptions(within(column).getByLabelText("Edit card priority"), "high");
-    await userEvent.type(within(column).getByLabelText("Edit card due date"), "2026-10-01");
+    await userEvent.type(within(column).getByLabelText("Edit card due date"), "2099-10-01");
 
     await userEvent.click(within(column).getByRole("button", { name: /^save$/i }));
 
     expect(within(column).queryByText("Gather customer signals")).not.toBeInTheDocument();
     const editedCard = within(column).getByText("Gather signals (updated)").closest("article");
     expect(editedCard).not.toBeNull();
-    expect(within(editedCard as HTMLElement).getByText("Due 2026-10-01")).toBeInTheDocument();
+    expect(within(editedCard as HTMLElement).getByText("Due 2099-10-01")).toBeInTheDocument();
   });
 
   it("cancels an edit without applying changes", async () => {

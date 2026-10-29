@@ -2,7 +2,9 @@
 
 Full-repo review of the Project Management MVP (backend, frontend, Docker/deploy, tests, docs) as of the current `main` branch. Findings are ordered by severity within each section; each includes the affected file(s) and a concrete recommended action.
 
-**Status:** all five steps of the "Suggested action order" are complete — items #1-#6, #8-#11, and #14 have been fixed and verified (see the "Resolved" note under each). Remaining open items: #7 (no real auth — accepted MVP limitation), #12 (Dockerfile not using `uv`), #13 (no logout/session persistence), #15 (sync blocking calls — fine at MVP scale).
+**Status:** all five steps of the "Suggested action order" are complete — items #1-#6, #8-#11, and #14 have been fixed and verified (see the "Resolved" note under each). #7 (no real auth) and #13 (no logout/session persistence) are now also resolved, by the later multi-user/multi-board/collaboration work (see their notes below) — this doc just hadn't been updated to say so. Remaining open item: #12 (Dockerfile not using `uv`); #15 (sync blocking calls) remains an accepted fine-at-MVP-scale tradeoff, not a defect.
+
+All Critical and Medium findings (#1-#9) are resolved. Nothing above Low/nits severity remains open.
 
 ## Summary
 
@@ -55,6 +57,8 @@ The `Dockerfile` (`backend/../Dockerfile:16`) does `COPY . .` with no `.dockerig
 ### 7. No real authentication on the backend
 Every `/api/board` and `/api/chat` call trusts a client-supplied `user_id` with no session/token verification (`backend/app/main.py:130-231`) — anyone who can reach the backend can read or overwrite any other user's board by simply choosing their `user_id`. This is explicitly called out as an accepted MVP limitation in `AGENTS.md` ("only a user sign in hardcoded... database will support multiple users for future"), so it's not a bug relative to current scope, but it's worth flagging now since it's the most consequential thing to fix before this runs anywhere beyond a single trusted local machine.
 **Action:** no change needed for the current PoC scope; when real multi-user support lands, replace the client-supplied `user_id` with a server-issued session token tied to login.
+
+**Resolved:** real multi-user accounts landed (see `docs/PLAN.md` Parts 4-6, 13): `POST /api/auth/register`/`login` hash passwords with bcrypt and issue an opaque `secrets.token_urlsafe` session token stored in a `sessions` table; every other endpoint requires `Authorization: Bearer <token>` and resolves to a `CurrentUser` via the `get_current_user` dependency (`backend/app/main.py`) — there is no client-supplied `user_id` anywhere left to spoof. Board access is further scoped per-request via `get_owned_board_row` (owner-only: delete, manage collaborators) and `get_accessible_board_row` (owner or collaborator: read, update, chat), both returning 404/403 appropriately. Covered by backend tests for cross-user access, unauthenticated requests, and ownership enforcement.
 
 ### 8. Chat's structured-response parsing is brittle for real LLM output
 `extract_json_object`/`parse_ai_response_text` (`backend/app/main.py:76-122`) find the *first* `{`...`}` blob in the model's raw text and try to parse it as the whole response. This works for the tests' hand-crafted mock output, but the OpenRouter request (`backend/app/main.py:199-213`) doesn't use a strict JSON mode / `response_format` constraint, so nothing stops the real model from prefacing its JSON with prose, or from including an unrelated `{...}` example in its explanation, both of which would either silently drop a real board update or misparse a wrong stand-in object as the board.
@@ -116,7 +120,6 @@ Not in the original review — surfaced live in the browser after the action-3 s
 
 ## Remaining open items
 
-- **#7** No real authentication — accepted MVP limitation per `AGENTS.md`; revisit when real multi-user support lands.
 - **#12** `Dockerfile` uses plain `pip` instead of `uv`, deviating from `AGENTS.md`'s stated technical decision.
-- **#13** No logout / session persistence across page refresh.
+- ~~**#13** No logout / session persistence across page refresh.~~ **Resolved** by the same multi-user work as #7: `frontend/src/lib/session.ts` persists `{token, userId, username}` to `localStorage` and `page.tsx` revalidates it against `/api/auth/me` on load; a logout control calls `POST /api/auth/logout` to delete the session server-side and clears local storage. Covered by a Playwright e2e test ("signs out and returns to the login screen").
 - **#15** Sync blocking calls in FastAPI handlers — fine at MVP/local scale, worth revisiting if concurrent usage grows.
